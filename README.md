@@ -79,7 +79,7 @@ Each example can be tested using the corresponding anonymous Apex script in the 
 To deploy this code to your org:
 
 ```bash
-sfdx force:source:deploy -p force-app -u your-org-alias
+sf project deploy start --source-dir force-app -o your-org-alias
 ```
 
 ## Running the Examples
@@ -87,7 +87,7 @@ sfdx force:source:deploy -p force-app -u your-org-alias
 To execute any of the anonymous Apex examples:
 
 ```bash
-sfdx force:apex:execute -f scripts/apex/[script-name].apex -u your-org-alias
+sf apex run --file scripts/apex/[script-name].apex -o your-org-alias
 ```
 
 ## Resources
