@@ -1,4 +1,4 @@
-public with sharing class AgentConcurrency {
+public without sharing class AgentConcurrency {
     /**
      * @description Launches multiple concurrent booking processes for test contacts
      * @param sessionId The Session ID to book the contacts for
@@ -14,6 +14,7 @@ public with sharing class AgentConcurrency {
             SELECT Id, FirstName, LastName, Email
             FROM Contact
             WHERE FirstName = 'Test'
+            WITH SYSTEM_MODE
             LIMIT 10
         ];
         
@@ -101,6 +102,7 @@ public with sharing class AgentConcurrency {
                 
             } catch (Exception e) {
                 System.debug('Error in BookingQueueableWithLock: ' + e.getMessage() + ' - ' + e.getStackTraceString());
+                throw e;
             }
         }
     }
