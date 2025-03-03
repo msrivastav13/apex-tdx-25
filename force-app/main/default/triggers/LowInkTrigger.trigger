@@ -1,50 +1,81 @@
 trigger LowInkTrigger on Low_Ink__e(after insert) {
-    // Track successfully processed events
-    Integer processedCount = 0;
+    // Track the last processed replay ID for checkpointing
     String lastProcessedReplayId;
     
     try {
-        // Process each event in the batch
+        // Collect all device IDs from the events
+        Set<Decimal> deviceIds = new Set<Decimal>();
+        
         for (Low_Ink__e event : Trigger.new) {
-            try {
-                // Process the event
-                PlatformEventDemo.processDeviceEvents(new Set<Decimal>{event.DeviceId__c});
-                
-                // Update tracking variables after successful processing
-                processedCount++;
-                lastProcessedReplayId = event.ReplayId;
-                
-            } catch (CalloutException ce) {
-                // For transient external service errors - will retry
+            deviceIds.add(event.DeviceId__c);
+            lastProcessedReplayId = event.ReplayId; // Keep track of replay ID for checkpoint
+        }
+        
+        // Process all device IDs in bulk and get the results
+        PlatformEventDemo.ProcessingResult results = PlatformEventDemo.processDeviceEvents(deviceIds);
+        
+        // Handle resource availability issues
+        if (results.hasResourceIssues()) {
+            EventTelemetry.logTelemetry('Low_Ink__e', 'LowInkTrigger', Trigger.new.size(), 'Resource issue', results.getResourceIssueMessage());
+            
+            // Retry up to 3 times without setting resume checkpoint
+            if (EventBus.TriggerContext.currentContext().retries < 3) {
                 throw new EventBus.RetryableException(
-                    'External service temporarily unavailable. Will retry.'
+                    'Resource unavailable. Retry attempt: ' + 
+                    EventBus.TriggerContext.currentContext().retries
                 );
-            } catch (PlatformEventDemo.PlatformEventsDemoException pe) {
-                // For resource availability issues - will retry up to 3 times
-                if (EventBus.TriggerContext.currentContext().retries < 3) {
-                    throw new EventBus.RetryableException(
-                        'Resource unavailable. Retry attempt: ' + 
-                        EventBus.TriggerContext.currentContext().retries
-                    );
-                } else {
-                    System.debug('Failed after maximum retries: ' + pe.getMessage());
-                }
-            } catch (LimitException le) {
-                // For governor limits - set checkpoint and retry remaining events later
-                EventBus.TriggerContext.currentContext().setResumeCheckpoint(lastProcessedReplayId);
-                throw le;
+            } else {
+                System.debug('Failed after maximum retries: ' + results.getResourceIssueMessage());
             }
         }
+        
+        // Handle external service issues
+        if (results.hasExternalServiceIssues()) {
+            EventTelemetry.logTelemetry('Low_Ink__e', 'LowInkTrigger', Trigger.new.size(), 'External service issue', results.getExternalServiceIssueMessage());
+            
+            // Retry for external service issues without setting resume checkpoint
+            if (EventBus.TriggerContext.currentContext().retries < 3) {
+                throw new EventBus.RetryableException(
+                    'External service unavailable. Retry attempt: ' + 
+                    EventBus.TriggerContext.currentContext().retries
+                );
+            } else {
+                System.debug('Failed after maximum retries: ' + results.getExternalServiceIssueMessage());
+            }
+        }
+        
+        // Log success telemetry if we processed any devices successfully
+        if (results.hasSuccessfulDevices()) {
+            EventTelemetry.TelemetryParams successParams = new EventTelemetry.TelemetryParams(
+                'Low_Ink__e', 'LowInkTrigger', Trigger.new.size()
+            );
+            successParams.successCount = results.successfulDevices.size();
+            EventTelemetry.publishSuccessTelemetry(successParams);
+        }
+        
     } catch (Exception e) {
-        // Emit telemetry for monitoring platform event processing
-        EventBus.publish(new SubscriberTelemetry__e(
-            Topic__c = 'Low_Ink__e',
-            ApexTrigger__c = 'LowInkTrigger',
-            Position__c = [SELECT Position FROM EventBusSubscriber WHERE Topic = 'Low_Ink__e'][0].Position,
-            BatchSize__c = Trigger.new.size(),
-            Retries__c = EventBus.TriggerContext.currentContext().retries,
-            LastError__c = e.getMessage()
-        ));
-        throw e;
+        // Unified exception handling
+        EventTelemetry.logTelemetry('Low_Ink__e', 'LowInkTrigger', Trigger.new.size(), 'Exception', e.getMessage());
+        
+        // Handle different types of exceptions appropriately
+        if (e instanceof CalloutException) {
+            // Transient errors that can be fixed with a retry - no checkpoint
+            if (EventBus.TriggerContext.currentContext().retries < 3) {
+                throw new EventBus.RetryableException(
+                    'Transient error during processing. Retry attempt: ' + 
+                    EventBus.TriggerContext.currentContext().retries
+                );
+            } else {
+                System.debug('Failed after maximum retries for transient error: ' + e.getMessage());
+            }
+        } else if (e instanceof LimitException || e instanceof System.LimitException) {
+            // Governor limit exceptions - set checkpoint but no retry
+            // Set checkpoint ONLY for governor limit exceptions
+            EventBus.TriggerContext.currentContext().setResumeCheckpoint(lastProcessedReplayId);
+            System.debug('Governor limit exceeded. Event processing checkpointed but not retried: ' + e.getMessage());
+        } else {
+            // For other exceptions that cannot be handled by retry, re-throw
+            throw e;
+        }
     }
 }
