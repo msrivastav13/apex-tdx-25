@@ -1,23 +1,34 @@
 public with sharing class PlatformEventDemo {
     public static void processDeviceEvents(Set<Decimal> deviceIds) {
-        for (Decimal i : deviceIds) {
-            if ((Math.mod(i.intValue(), 2) == 0)) {
-                // Standard exception
+        Integer processedCount = 0;
+        
+        for (Decimal deviceId : deviceIds) {
+            // Count processed events to demonstrate checkpoint scenario
+            processedCount++;
+            
+            // Simulate different processing scenarios based on device ID
+            if (Math.mod(deviceId.intValue(), 2) == 0) {
+                // Even IDs: Simulate resource availability issue
                 throw new PlatformEventsDemoException(
-                    'Invalid Custom Exception'
+                    'Device ' + deviceId + ' - Resource not available'
                 );
-            } else if ((Math.mod(i.intValue(), 3) == 0)) {
-                // Divide by zero!
-                Integer newAmount = 20 / 0;
-            } else if ((Math.mod(i.intValue(), 5)) == 0) {
-                // Limits exception
-                for (Integer idx = 0; idx < 201; idx++) {
-                    Account acc = [SELECT Id FROM Account LIMIT 1];
-                }
-            } else {
+            } else if (Math.mod(deviceId.intValue(), 3) == 0) {
+                // Divisible by 3: Simulate external service issue
+                throw new CalloutException(
+                    'Device ' + deviceId + ' - External service unavailable'
+                );
+            }
+            
+            // If we get here, process was successful
+            System.debug('Successfully processed device: ' + deviceId);
+            
+            // Simulate hitting governor limit after processing 3 events
+            if (processedCount >= 3) {
+                throw new LimitException('Hit governor limit after processing ' + processedCount + ' events');
             }
         }
     }
+    
     public class PlatformEventsDemoException extends Exception {
     }
 }
